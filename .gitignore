@@ -1,6 +1,7 @@
 /target
 
-# uni/lwoodz/traci run artifacts — regenerated per analysis run, not source
+# uni/lwoodz/traci/kaptaind run artifacts — regenerated per analysis run, not source
 /.uni/
 /.lwoodz/
 /.traci/
+/.kaptaind/
