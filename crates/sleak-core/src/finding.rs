@@ -54,6 +54,21 @@ impl FindingId {
         Self("SLK003".to_string())
     }
 
+    /// SLK004 — declared architectural boundary violation.
+    pub fn boundary_violation() -> Self {
+        Self("SLK004".to_string())
+    }
+
+    /// SLK006 — excessive centrality.
+    pub fn excessive_centrality() -> Self {
+        Self("SLK006".to_string())
+    }
+
+    /// SLK007 — high blast radius.
+    pub fn high_blast_radius() -> Self {
+        Self("SLK007".to_string())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

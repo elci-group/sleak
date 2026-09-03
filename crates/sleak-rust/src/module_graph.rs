@@ -7,6 +7,10 @@ pub struct ModuleFile {
     pub node_id: NodeId,
     pub module_path: Vec<String>,
     pub file_path: Utf8PathBuf,
+    /// Path relative to the crate root, `src`-prefixed (e.g.
+    /// `src/domain/order.rs`) — the form declared architectural
+    /// boundaries (directive §4.3) are matched against.
+    pub crate_relative_path: Utf8PathBuf,
 }
 
 impl ModuleFile {
@@ -15,6 +19,7 @@ impl ModuleFile {
             id: self.node_id.clone(),
             kind: NodeKind::Module,
             label: self.module_path.join("::"),
+            path: Some(self.crate_relative_path.clone()),
         }
     }
 }
@@ -61,10 +66,12 @@ pub fn discover_module_files(crate_name: &str, src_root: &Utf8Path) -> Result<Ve
             _ => segments,
         };
         let node_id = module_node_id(crate_name, &module_path);
+        let crate_relative_path = Utf8PathBuf::from(format!("src/{rel}"));
         out.push(ModuleFile {
             node_id,
             module_path,
             file_path,
+            crate_relative_path,
         });
     }
     Ok(out)
@@ -152,11 +159,17 @@ fn walk_use_tree(tree: &syn::UseTree, prefix: &mut Vec<String>, out: &mut Vec<Ve
 /// prefix of the remaining segments that matches a known module in that
 /// crate is used — this lets `use crate::foo::SomeType` resolve to the
 /// `foo` module even though `SomeType` itself isn't a module.
+///
+/// `known_crate_names` maps each crate's Rust identifier form (`_`, as
+/// it appears in `use` paths) to its Cargo package name (which may use
+/// `-` instead, e.g. `sleak-core` is written `sleak_core` in code) —
+/// comparing a raw `use` path against a Cargo-hyphenated name directly
+/// would silently never match.
 fn resolve_use(
     raw: &[String],
     current_crate: &str,
     current_module_path: &[String],
-    known_crate_names: &BTreeSet<String>,
+    known_crate_names: &BTreeMap<String, String>,
     module_registry: &BTreeMap<String, BTreeSet<Vec<String>>>,
 ) -> Option<NodeId> {
     let head = raw.first()?;
@@ -177,10 +190,9 @@ fn resolve_use(
         let mut p = current_module_path[..current_module_path.len() - depth].to_vec();
         p.extend_from_slice(&raw[depth..]);
         (current_crate.to_string(), p)
-    } else if known_crate_names.contains(head) {
-        (head.clone(), raw[1..].to_vec())
     } else {
-        return None;
+        let cargo_name = known_crate_names.get(head)?;
+        (cargo_name.clone(), raw[1..].to_vec())
     };
 
     let known = module_registry.get(&target_crate)?;
@@ -203,7 +215,7 @@ fn resolve_use(
 pub fn import_edges(
     file: &ModuleFile,
     current_crate: &str,
-    known_crate_names: &BTreeSet<String>,
+    known_crate_names: &BTreeMap<String, String>,
     module_registry: &BTreeMap<String, BTreeSet<Vec<String>>>,
 ) -> Result<Vec<Edge>> {
     let contents = std::fs::read_to_string(&file.file_path).map_err(|source| SleakError::Io {

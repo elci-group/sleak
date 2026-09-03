@@ -3,6 +3,7 @@
 //! no algorithms — `sleak-graph` is where the IR gets loaded into a real
 //! graph structure and queried.
 
+use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use sleak_core::{EdgeKind, NodeId, NodeKind};
 
@@ -12,6 +13,12 @@ pub struct Node {
     pub kind: NodeKind,
     /// Human-readable label (e.g. crate name, or `foo::bar` module path).
     pub label: String,
+    /// Crate-relative source path (e.g. `src/domain/order.rs`), used for
+    /// declared-boundary matching (directive §4.3). `Crate` nodes carry
+    /// `None` — boundaries classify individual modules, not whole
+    /// crates.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub path: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

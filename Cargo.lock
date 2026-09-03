@@ -510,8 +510,10 @@ dependencies = [
  "camino",
  "clap",
  "predicates",
+ "serde_json",
  "sleak-core",
  "sleak-graph",
+ "sleak-ir",
  "sleak-policy",
  "sleak-report",
  "sleak-rust",
@@ -540,6 +542,7 @@ dependencies = [
 name = "sleak-ir"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "serde",
  "sleak-core",
 ]
@@ -548,9 +551,11 @@ dependencies = [
 name = "sleak-policy"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "serde",
  "serde_json",
  "sleak-core",
+ "sleak-ir",
  "tempfile",
  "toml",
 ]

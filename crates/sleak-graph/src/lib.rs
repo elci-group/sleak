@@ -4,6 +4,8 @@
 //! crate only — it never appears in `sleak-ir`'s or `sleak-core`'s
 //! public API.
 
+mod topology;
+
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::Direction;
@@ -11,9 +13,11 @@ use sleak_core::{EdgeKind, NodeId};
 use sleak_ir::ArchitectureModel;
 use std::collections::BTreeMap;
 
+pub use topology::BlastRadius;
+
 pub struct ArchGraph {
-    graph: DiGraph<NodeId, EdgeKind>,
-    index: BTreeMap<NodeId, NodeIndex>,
+    pub(crate) graph: DiGraph<NodeId, EdgeKind>,
+    pub(crate) index: BTreeMap<NodeId, NodeIndex>,
 }
 
 impl ArchGraph {
@@ -38,18 +42,27 @@ impl ArchGraph {
         Self { graph, index }
     }
 
+    /// Direct dependants, counting only structural (`DependsOn`,
+    /// `Imports`, ...) edges — `Owns` edges (crate → its own modules)
+    /// are excluded, since they exist to keep the graph connected for
+    /// centrality/blast-radius purposes and don't represent a real
+    /// dependant relationship a fan-in policy should react to.
     pub fn fan_in(&self, id: &NodeId) -> usize {
         self.index.get(id).map_or(0, |&idx| {
             self.graph
-                .neighbors_directed(idx, Direction::Incoming)
+                .edges_directed(idx, Direction::Incoming)
+                .filter(|e| *e.weight() != EdgeKind::Owns)
                 .count()
         })
     }
 
+    /// Direct dependencies, with the same `Owns`-exclusion as
+    /// [`ArchGraph::fan_in`].
     pub fn fan_out(&self, id: &NodeId) -> usize {
         self.index.get(id).map_or(0, |&idx| {
             self.graph
-                .neighbors_directed(idx, Direction::Outgoing)
+                .edges_directed(idx, Direction::Outgoing)
+                .filter(|e| *e.weight() != EdgeKind::Owns)
                 .count()
         })
     }
@@ -64,6 +77,8 @@ impl ArchGraph {
 
     /// Strongly-connected components larger than one node (i.e. import
     /// cycles), each returned as a sorted, deterministic node list.
+    /// Computed on the structural (non-`Owns`) subgraph — a crate owning
+    /// several modules must never be reported as "cyclic" with them.
     ///
     /// This reports *cycle membership* — every node mutually reachable
     /// within the component — not a minimal simple cycle. Extracting
@@ -71,24 +86,36 @@ impl ArchGraph {
     /// algorithm (e.g. Johnson's); deferred until evidence shows the
     /// distinction matters to a caller.
     pub fn cycles(&self) -> Vec<Vec<NodeId>> {
-        let sccs = tarjan_scc(&self.graph);
+        let structural = self.structural_subgraph();
+        let sccs = tarjan_scc(&structural);
         let mut cycles: Vec<Vec<NodeId>> = sccs
             .into_iter()
             .filter(|scc| {
                 scc.len() > 1
                     || scc
                         .first()
-                        .is_some_and(|&idx| self.graph.contains_edge(idx, idx))
+                        .is_some_and(|&idx| structural.contains_edge(idx, idx))
             })
             .map(|scc| {
                 let mut ids: Vec<NodeId> =
-                    scc.into_iter().map(|idx| self.graph[idx].clone()).collect();
+                    scc.into_iter().map(|idx| structural[idx].clone()).collect();
                 ids.sort();
                 ids
             })
             .collect();
         cycles.sort();
         cycles
+    }
+
+    /// A copy of the graph with `Owns` edges removed — cheap enough to
+    /// rebuild per call at the sizes Sleak targets, and it keeps
+    /// `self.graph` (used by centrality/blast-radius, which *want*
+    /// `Owns` edges for connectivity) as the single source of truth.
+    fn structural_subgraph(&self) -> DiGraph<NodeId, EdgeKind> {
+        self.graph.filter_map(
+            |_, node| Some(node.clone()),
+            |_, edge| (*edge != EdgeKind::Owns).then_some(*edge),
+        )
     }
 }
 
@@ -103,6 +130,7 @@ mod tests {
             id: NodeId::new(id),
             kind: NodeKind::Module,
             label: id.to_string(),
+            path: None,
         }
     }
 

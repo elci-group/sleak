@@ -48,6 +48,7 @@ pub fn build(workspace_root: &Utf8Path) -> Result<(ArchitectureModel, Vec<CrateI
             id: crate_node_id(&name),
             kind: NodeKind::Crate,
             label: name.clone(),
+            path: None,
         });
         let src_root = pkg
             .manifest_path

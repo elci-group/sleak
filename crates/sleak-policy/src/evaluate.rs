@@ -1,20 +1,7 @@
+use crate::common::{self, severity_for_ratio};
 use crate::config::{Config, CyclePolicy};
 use sleak_core::{Finding, FindingId, NodeId, Severity};
-use std::cmp::Reverse;
 use std::collections::BTreeMap;
-
-/// Severity from magnitude over threshold (directive §19: a metric
-/// exceeding a threshold is not automatically CRITICAL). Only called
-/// once a value is already known to exceed its threshold.
-fn severity_for_ratio(ratio: f64) -> Severity {
-    if ratio > 2.0 {
-        Severity::Critical
-    } else if ratio > 1.5 {
-        Severity::Major
-    } else {
-        Severity::Minor
-    }
-}
 
 fn fan_in_finding(id: &NodeId, fan_in: usize, max: u32) -> Finding {
     let ratio = fan_in as f64 / max.max(1) as f64;
@@ -108,7 +95,7 @@ pub fn evaluate(
         }
     }
 
-    findings.sort_by_key(|f| (Reverse(f.severity), f.id.clone(), f.target.clone()));
+    common::sort_findings(&mut findings);
     findings
 }
 
@@ -123,7 +110,9 @@ mod tests {
                 max_fan_in,
                 max_fan_out,
                 cycles,
+                ..PolicyConfig::default()
             },
+            ..Config::default()
         }
     }
 

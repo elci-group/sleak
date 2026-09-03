@@ -8,3 +8,4 @@ repository.workspace = true
 [dependencies]
 sleak-core.workspace = true
 serde.workspace = true
+camino.workspace = true
