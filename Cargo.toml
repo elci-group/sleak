@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sleak-cli",
+    "crates/sleak-core",
+    "crates/sleak-ir",
+    "crates/sleak-graph",
+    "crates/sleak-rust",
+    "crates/sleak-policy",
+    "crates/sleak-report",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/elci-group/sleak"
+
+[workspace.dependencies]
+sleak-core = { path = "crates/sleak-core" }
+sleak-ir = { path = "crates/sleak-ir" }
+sleak-graph = { path = "crates/sleak-graph" }
+sleak-rust = { path = "crates/sleak-rust" }
+sleak-policy = { path = "crates/sleak-policy" }
+sleak-report = { path = "crates/sleak-report" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+petgraph = "0.8"
+cargo_metadata = "0.23"
+syn = { version = "3", features = ["full", "parsing", "extra-traits"] }
+proc-macro2 = "1"
+camino = { version = "1", features = ["serde1"] }
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"

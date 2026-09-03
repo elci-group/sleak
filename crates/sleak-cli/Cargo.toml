@@ -1,0 +1,24 @@
+[package]
+name = "sleak-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sleak"
+path = "src/main.rs"
+
+[dependencies]
+sleak-core.workspace = true
+sleak-graph.workspace = true
+sleak-rust.workspace = true
+sleak-policy.workspace = true
+sleak-report.workspace = true
+clap.workspace = true
+camino.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true
