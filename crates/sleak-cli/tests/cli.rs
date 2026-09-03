@@ -155,3 +155,75 @@ fn non_cargo_directory_is_a_configuration_error() {
         .code(2)
         .stderr(predicate::str::contains("not a Cargo workspace"));
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .status()
+        .expect("git must be on PATH to run this test");
+    assert!(status.success(), "git {args:?} failed in {dir:?}");
+}
+
+/// A crate whose single module file is touched by many more commits
+/// than any other file: with a low `max_change_frequency`, that module
+/// should trip SLK009. A workspace with no `.git` at all (the other
+/// fixtures in this file) must keep working exactly as before —
+/// history is optional evidence, not a requirement.
+#[test]
+fn hot_file_across_many_commits_triggers_slk009() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&["hot"]));
+    write(&root.join("hot/Cargo.toml"), &crate_cargo_toml("hot", &[]));
+    write(&root.join("hot/src/lib.rs"), "pub fn v0() {}\n");
+    write(
+        &root.join(".sleak.toml"),
+        "[policy]\nmax_change_frequency = 0.5\n[history]\nwindow = 50\n",
+    );
+
+    git(root, &["init", "--quiet"]);
+    git(root, &["config", "user.name", "Sleak Test"]);
+    git(root, &["config", "user.email", "sleak-test@example.com"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "initial"]);
+
+    for i in 1..8 {
+        write(
+            &root.join("hot/src/lib.rs"),
+            &format!("pub fn v{i}() {{}}\n"),
+        );
+        git(root, &["add", "hot/src/lib.rs"]);
+        git(root, &["commit", "--quiet", "-m", &format!("edit {i}")]);
+    }
+
+    sleak()
+        .arg("scan")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SLK009"))
+        .stdout(predicate::str::contains("module:hot"));
+}
+
+/// A non-git workspace (every other fixture here) must still scan
+/// cleanly with history enabled by default — the absence of `.git` is
+/// not an error, and no SLK009 finding is fabricated from nothing.
+#[test]
+fn non_git_workspace_scans_without_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&["a"]));
+    write(&root.join("a/Cargo.toml"), &crate_cargo_toml("a", &[]));
+    write(&root.join("a/src/lib.rs"), "pub fn hello() {}\n");
+
+    sleak()
+        .arg("scan")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SLK009").not());
+}

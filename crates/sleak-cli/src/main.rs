@@ -163,7 +163,7 @@ fn run_explain(id: &str, path: &Utf8PathBuf, format: Format) -> SleakResult<Exit
 }
 
 fn run_graph(path: &Utf8PathBuf, output: &str) -> SleakResult<ExitCode> {
-    let model = sleak_rust::build_model(path)?;
+    let (model, _file_index) = sleak_rust::build_model(path)?;
     match output {
         "dot" => println!("{}", graph_render::to_dot(&model)),
         "json" => println!(

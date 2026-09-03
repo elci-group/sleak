@@ -15,10 +15,17 @@
 mod crate_graph;
 mod module_graph;
 
-use camino::Utf8Path;
-use sleak_core::{EdgeKind, Result, SleakError};
+use camino::{Utf8Path, Utf8PathBuf};
+use sleak_core::{EdgeKind, NodeId, Result, SleakError};
 use sleak_ir::{ArchitectureModel, Edge};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Workspace-root-relative source-file path -> the module node it maps
+/// to. Built alongside the model (not recomputed separately) so it can
+/// never drift from it. Its purpose is correlating git history (which
+/// reports paths this way) with the architectural graph — see
+/// `sleak-git` and `sleak_policy::evaluate_change_concentration`.
+pub type FileIndex = BTreeMap<Utf8PathBuf, NodeId>;
 
 /// Builds the full architectural model for the Cargo workspace rooted at
 /// `workspace_root`: one `Crate` node + `DependsOn` edge per
@@ -33,12 +40,24 @@ use std::collections::{BTreeMap, BTreeSet};
 /// makes "what breaks if this is removed" meaningless at the whole-
 /// architecture scale. `sleak-graph` deliberately excludes `Owns` edges
 /// from fan-in/fan-out/cycle detection, where they'd only add noise.
-pub fn build_model(workspace_root: &Utf8Path) -> Result<ArchitectureModel> {
+///
+/// Also returns a [`FileIndex`]. Building it here assumes the git
+/// repository root (if any) coincides with `workspace_root` — where it
+/// doesn't, the index simply won't match any git-reported path, and
+/// history-based findings silently won't fire for that repository
+/// rather than firing on wrong data.
+pub fn build_model(workspace_root: &Utf8Path) -> Result<(ArchitectureModel, FileIndex)> {
     if !workspace_root.join("Cargo.toml").is_file() {
         return Err(SleakError::NotACargoWorkspace {
             path: workspace_root.as_std_path().to_path_buf(),
         });
     }
+    let canonical_root = workspace_root
+        .canonicalize_utf8()
+        .map_err(|source| SleakError::Io {
+            path: workspace_root.as_std_path().to_path_buf(),
+            source,
+        })?;
 
     let (mut model, crates) = crate_graph::build(workspace_root)?;
     // Rust identifier form (as it appears in `use` paths) -> Cargo
@@ -50,6 +69,7 @@ pub fn build_model(workspace_root: &Utf8Path) -> Result<ArchitectureModel> {
 
     let mut per_crate_files = BTreeMap::new();
     let mut module_registry = BTreeMap::new();
+    let mut file_index = FileIndex::new();
     for info in &crates {
         let files = module_graph::discover_module_files(&info.name, &info.src_root)?;
         let crate_id = crate_graph::crate_node_id(&info.name);
@@ -60,6 +80,9 @@ pub fn build_model(workspace_root: &Utf8Path) -> Result<ArchitectureModel> {
                 to: file.node_id.clone(),
                 kind: EdgeKind::Owns,
             });
+            if let Ok(relative) = file.file_path.strip_prefix(&canonical_root) {
+                file_index.insert(relative.to_path_buf(), file.node_id.clone());
+            }
         }
         module_registry.insert(
             info.name.clone(),
@@ -80,5 +103,5 @@ pub fn build_model(workspace_root: &Utf8Path) -> Result<ArchitectureModel> {
     }
 
     model.canonicalize();
-    Ok(model)
+    Ok((model, file_index))
 }

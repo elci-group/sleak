@@ -28,6 +28,12 @@ pub struct PolicyConfig {
     /// become unreachable before a node's blast radius is flagged
     /// (SLK007). Default matches the directive's own example (§15).
     pub max_blast_radius: f64,
+    /// Fraction (0.0-1.0) of analysed commits that may touch a single
+    /// node before it's flagged as a change-concentration hotspot
+    /// (SLK009, directive §9). Expressed as a fraction of the analysis
+    /// window rather than a raw commit count so it means the same thing
+    /// regardless of `[history].window`.
+    pub max_change_frequency: f64,
 }
 
 impl Default for PolicyConfig {
@@ -38,6 +44,27 @@ impl Default for PolicyConfig {
             cycles: CyclePolicy::default(),
             max_centrality: 0.20,
             max_blast_radius: 0.30,
+            max_change_frequency: 0.15,
+        }
+    }
+}
+
+/// Git-history ingestion settings (directive §9/§15). History is
+/// optional evidence — every consumer degrades gracefully (no findings,
+/// no error) when the target isn't a git repository, regardless of
+/// `enabled`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct HistoryConfig {
+    pub enabled: bool,
+    pub window: usize,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            window: 500,
         }
     }
 }
@@ -70,6 +97,7 @@ pub struct BoundariesConfig {
 pub struct Config {
     pub policy: PolicyConfig,
     pub boundaries: BoundariesConfig,
+    pub history: HistoryConfig,
 }
 
 impl Config {
@@ -103,7 +131,24 @@ mod tests {
         assert_eq!(cfg.policy.cycles, CyclePolicy::Error);
         assert_eq!(cfg.policy.max_centrality, 0.20);
         assert_eq!(cfg.policy.max_blast_radius, 0.30);
+        assert_eq!(cfg.policy.max_change_frequency, 0.15);
         assert!(!cfg.boundaries.enabled);
+        assert!(cfg.history.enabled);
+        assert_eq!(cfg.history.window, 500);
+    }
+
+    #[test]
+    fn history_config_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "[history]\nenabled = false\nwindow = 100\n",
+        )
+        .unwrap();
+
+        let cfg = Config::load(dir.path()).unwrap();
+        assert!(!cfg.history.enabled);
+        assert_eq!(cfg.history.window, 100);
     }
 
     #[test]

@@ -6,6 +6,7 @@ members = [
     "crates/sleak-ir",
     "crates/sleak-graph",
     "crates/sleak-rust",
+    "crates/sleak-git",
     "crates/sleak-policy",
     "crates/sleak-report",
 ]
@@ -21,6 +22,7 @@ sleak-core = { path = "crates/sleak-core" }
 sleak-ir = { path = "crates/sleak-ir" }
 sleak-graph = { path = "crates/sleak-graph" }
 sleak-rust = { path = "crates/sleak-rust" }
+sleak-git = { path = "crates/sleak-git" }
 sleak-policy = { path = "crates/sleak-policy" }
 sleak-report = { path = "crates/sleak-report" }
 

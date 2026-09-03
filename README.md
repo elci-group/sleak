@@ -9,7 +9,7 @@ The anti-monolith architecture engine of ELCI.
 > lets a human or a governance policy decide whether that concentration
 > is acceptable.
 
-## Status: Phase 2 — Topology
+## Status: Phase 3 — Temporal
 
 Deterministic, offline, read-only analysis of a Rust Cargo workspace.
 No mutation of any kind.
@@ -54,6 +54,19 @@ Implemented:
   - **SLK004** declared boundary violation
   - **SLK006** excessive centrality
   - **SLK007** high blast radius
+  - **SLK009** architectural change concentration
+- Git-history ingestion (`sleak-git`): shells out to the `git` CLI
+  (matching Scrawny's own abstraction) to find files that repeatedly
+  change together across recent commits. History is optional evidence —
+  every function degrades to "no history" rather than an error when the
+  target isn't a git repository, `git` isn't on `PATH`, or there's no
+  history yet; this assumes the git repository root coincides with the
+  Cargo workspace root. SLK009 fires when a node was touched by a
+  disproportionate fraction of the analysed commits — a signal on the
+  *location* ("this keeps attracting change"), complementing Scrawny's
+  per-commit "this one change is too broad" (actual cross-tool
+  correlation, per the directive's unified `FRACT-001 SCRAWNY-004
+  SLEAK-007`-style finding IDs, is Phase 5 scope).
 - Human and versioned-JSON output (`sleak-report`,
   `{"schema_version":"1","tool":"sleak","findings":[...]}`), each
   finding carrying severity, target, evidence, and (where meaningful) a
@@ -72,8 +85,6 @@ Not yet implemented (later phases per the project directive):
   none of that exists yet. **SLK010** (dependency bottleneck) is also
   deferred: every crisp definition tried either duplicated SLK001/002/
   006/007 or needed a semantic layer this build doesn't have.
-- **Phase 3 — Temporal**: Git-history ingestion (`sleak-git`),
-  change-concentration detection (SLK009), correlation with Scrawny.
 - **Phase 4 — Governance**: baselines (`sleak baseline create`),
   differential analysis (`sleak diff`), an Architecture Health score.
 - **Phase 5 — Integration**: SARIF output (`sleak-sarif`), Traci/
@@ -116,6 +127,11 @@ max_fan_out = 20
 cycles = "error"        # error | warn | ignore
 max_centrality = 0.20    # raw PageRank score (0.0-1.0)
 max_blast_radius = 0.30   # fraction of the rest of the architecture (0.0-1.0)
+max_change_frequency = 0.15  # fraction of analysed commits touching one node (0.0-1.0)
+
+[history]
+enabled = true
+window = 500   # how many recent commits to analyse
 
 [boundaries]
 enabled = false
@@ -139,3 +155,7 @@ Sleak never assumes a paradigm; the project declares its own layers and
 which crossings aren't allowed. A same-layer edge is never a violation,
 and an edge touching a node with no matching layer is skipped rather
 than guessed at.
+
+History is enabled by default but always optional in practice: scanning
+a directory with no `.git` (or where `git` isn't installed) simply
+skips SLK009 rather than erroring.

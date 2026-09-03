@@ -1,0 +1,12 @@
+[package]
+name = "sleak-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+camino.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

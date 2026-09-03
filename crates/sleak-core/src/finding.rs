@@ -69,6 +69,11 @@ impl FindingId {
         Self("SLK007".to_string())
     }
 
+    /// SLK009 — architectural change concentration.
+    pub fn architectural_change_concentration() -> Self {
+        Self("SLK009".to_string())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
