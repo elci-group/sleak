@@ -227,3 +227,168 @@ fn non_git_workspace_scans_without_error() {
         .success()
         .stdout(predicate::str::contains("SLK009").not());
 }
+
+fn hub_workspace(root: &Path, hub: &str, dependants: &[&str]) {
+    write(
+        &root.join(format!("{hub}/Cargo.toml")),
+        &crate_cargo_toml(hub, &[]),
+    );
+    write(
+        &root.join(format!("{hub}/src/lib.rs")),
+        "pub fn shared() {}\n",
+    );
+    for name in dependants {
+        write(
+            &root.join(format!("{name}/Cargo.toml")),
+            &crate_cargo_toml(name, &[hub]),
+        );
+        write(
+            &root.join(format!("{name}/src/lib.rs")),
+            &format!("pub fn call() {{ {hub}::shared(); }}\n"),
+        );
+    }
+}
+
+/// `sleak baseline create` records current findings as accepted debt:
+/// `check` then passes even though the same finding is still there, but
+/// still blocks on a genuinely new one introduced afterward.
+#[test]
+fn baseline_accepts_existing_debt_but_still_blocks_on_new_debt() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let members = ["hub", "a", "b", "c"];
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&members));
+    hub_workspace(root, "hub", &["a", "b", "c"]);
+    write(&root.join(".sleak.toml"), "[policy]\nmax_fan_in = 2\n");
+
+    sleak()
+        .arg("baseline")
+        .arg("create")
+        .arg(root)
+        .assert()
+        .success();
+    assert!(root.join(".sleak-baseline.json").exists());
+
+    // Same debt, already accepted: check passes.
+    sleak().arg("check").arg(root).assert().success();
+
+    // Introduce genuinely new, unrelated debt.
+    let all_members = ["hub", "a", "b", "c", "hub2", "p", "q", "r"];
+    write(
+        &root.join("Cargo.toml"),
+        &workspace_cargo_toml(&all_members),
+    );
+    hub_workspace(root, "hub2", &["p", "q", "r"]);
+
+    // Adding a whole new, disconnected hub subgraph also shifts blast
+    // radius for the rest of the graph — a real, honest side effect,
+    // not just the fan-in finding on hub2 — so this only pins the
+    // outcome that matters here: check now blocks, and the new hub is
+    // named as new debt (not just re-reported as already-accepted).
+    sleak()
+        .arg("check")
+        .arg(root)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("crate:hub2"))
+        .stdout(predicate::str::contains("2 existing (accepted)"));
+}
+
+/// `sleak diff <ref>` compares the working tree against a past commit
+/// without touching it, and reports a newly-introduced finding as a
+/// regression.
+#[test]
+fn diff_detects_a_regression_introduced_in_a_later_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(
+        &root.join("Cargo.toml"),
+        &workspace_cargo_toml(&["hub", "a"]),
+    );
+    hub_workspace(root, "hub", &["a"]);
+    write(&root.join(".sleak.toml"), "[policy]\nmax_fan_in = 2\n");
+
+    git(root, &["init", "--quiet"]);
+    git(root, &["config", "user.name", "Sleak Test"]);
+    git(root, &["config", "user.email", "sleak-test@example.com"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "healthy"]);
+
+    // A second commit adds enough dependants to trip SLK001.
+    let members = ["hub", "a", "b", "c"];
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&members));
+    write(&root.join("b/Cargo.toml"), &crate_cargo_toml("b", &["hub"]));
+    write(
+        &root.join("b/src/lib.rs"),
+        "pub fn call() { hub::shared(); }\n",
+    );
+    write(&root.join("c/Cargo.toml"), &crate_cargo_toml("c", &["hub"]));
+    write(
+        &root.join("c/src/lib.rs"),
+        "pub fn call() { hub::shared(); }\n",
+    );
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "add more dependants"]);
+
+    sleak()
+        .arg("diff")
+        .arg("HEAD~1")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("SLK001"))
+        .stdout(predicate::str::contains("crate:hub"))
+        .stdout(predicate::str::contains("Verdict: REGRESSION"));
+}
+
+/// Diffing a working tree against itself finds no differences.
+#[test]
+fn diff_against_head_is_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&["a"]));
+    write(&root.join("a/Cargo.toml"), &crate_cargo_toml("a", &[]));
+    write(&root.join("a/src/lib.rs"), "pub fn hello() {}\n");
+
+    git(root, &["init", "--quiet"]);
+    git(root, &["config", "user.name", "Sleak Test"]);
+    git(root, &["config", "user.email", "sleak-test@example.com"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "initial"]);
+
+    sleak()
+        .arg("diff")
+        .arg("HEAD")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Verdict: UNCHANGED"));
+}
+
+/// A ref that doesn't exist is an infrastructure/tooling failure
+/// (exit code 4), not a silent empty diff.
+#[test]
+fn diff_against_an_unknown_ref_is_an_infrastructure_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&["a"]));
+    write(&root.join("a/Cargo.toml"), &crate_cargo_toml("a", &[]));
+    write(&root.join("a/src/lib.rs"), "pub fn hello() {}\n");
+
+    git(root, &["init", "--quiet"]);
+    git(root, &["config", "user.name", "Sleak Test"]);
+    git(root, &["config", "user.email", "sleak-test@example.com"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "initial"]);
+
+    sleak()
+        .arg("diff")
+        .arg("not-a-real-ref")
+        .arg(root)
+        .assert()
+        .code(4);
+}

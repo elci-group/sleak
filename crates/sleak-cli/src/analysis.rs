@@ -6,8 +6,19 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Runs the full Phase 1-3 pipeline against `path` and returns every
 /// finding, already sorted (highest severity first). Shared by `scan`,
 /// `check`, and `explain` so all three see identical results for the
-/// same workspace.
+/// same workspace. Loads `.sleak.toml` from `path` itself.
 pub fn analyse(path: &Utf8Path) -> SleakResult<Vec<Finding>> {
+    let config = Config::load(path.as_std_path())?;
+    analyse_with_config(path, &config)
+}
+
+/// As [`analyse`], but with an already-loaded config rather than
+/// loading `path`'s own `.sleak.toml`. `sleak diff` needs this: it
+/// evaluates two different snapshots (the working tree and a ref) and
+/// must judge both against the *same* policy, not whatever `.sleak.toml`
+/// happened to say at each point in history — otherwise a loosened
+/// threshold could masquerade as an architectural improvement.
+pub fn analyse_with_config(path: &Utf8Path, config: &Config) -> SleakResult<Vec<Finding>> {
     let (model, file_index) = sleak_rust::build_model(path)?;
     let graph = sleak_graph::ArchGraph::from_model(&model);
 
@@ -20,12 +31,10 @@ pub fn analyse(path: &Utf8Path) -> SleakResult<Vec<Finding>> {
         .map(|(id, radius)| (id, (radius.disconnected_count, radius.fraction)))
         .collect();
 
-    let config = Config::load(path.as_std_path())?;
-
     let mut findings = Vec::new();
-    findings.extend(sleak_policy::evaluate(&degrees, &cycles, &config));
-    findings.extend(sleak_policy::evaluate_centrality(&page_rank, &config));
-    findings.extend(sleak_policy::evaluate_blast_radius(&blast_radius, &config));
+    findings.extend(sleak_policy::evaluate(&degrees, &cycles, config));
+    findings.extend(sleak_policy::evaluate_centrality(&page_rank, config));
+    findings.extend(sleak_policy::evaluate_blast_radius(&blast_radius, config));
     findings.extend(sleak_policy::evaluate_boundaries(
         &model,
         &config.boundaries,
@@ -38,7 +47,7 @@ pub fn analyse(path: &Utf8Path) -> SleakResult<Vec<Finding>> {
             findings.extend(sleak_policy::evaluate_change_concentration(
                 &touches,
                 commits.len(),
-                &config,
+                config,
             ));
         }
     }

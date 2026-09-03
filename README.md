@@ -9,7 +9,7 @@ The anti-monolith architecture engine of ELCI.
 > lets a human or a governance policy decide whether that concentration
 > is acceptable.
 
-## Status: Phase 3 — Temporal
+## Status: Phase 4 — Governance
 
 Deterministic, offline, read-only analysis of a Rust Cargo workspace.
 No mutation of any kind.
@@ -77,6 +77,26 @@ Implemented:
   <ID>` (taxonomy description + every current finding with that id), and
   `sleak graph` (raw node/edge export as `dot` or `json`, bypassing
   policy entirely).
+- Baselines (directive §16, `sleak-report::baseline`): `sleak baseline
+  create` records every current finding's identity (`id` + `target`,
+  not its evidence — a finding is "the same" across runs even as its
+  numbers shift slightly) to `.sleak-baseline.json`. When that file
+  exists, `sleak scan`/`sleak check` still report every current finding
+  (nothing is hidden) but `check` only blocks on ones *not* already in
+  the baseline — a project doesn't need to reach zero findings before
+  Sleak becomes a useful gate.
+- Differential analysis (directive §17): `sleak diff <ref>` builds the
+  architecture as it exists at `<ref>` into a throwaway temp directory
+  via `git archive` (no checkout, no stash, no mutation of the working
+  tree in any way) and compares it against the working tree using the
+  same baseline machinery, judged against one consistent `.sleak.toml`
+  so a mere policy change can't masquerade as an architectural
+  regression. Reports new / existing / resolved findings and a
+  REGRESSION / IMPROVEMENT / UNCHANGED verdict. SLK009 is excluded from
+  the comparison on both sides — a `git archive` snapshot has no `.git`
+  history to compute it from, so including it would make every current
+  SLK009 finding look "new" on every diff regardless of what changed;
+  `sleak scan`/`sleak check` remain the way to see it.
 
 Not yet implemented (later phases per the project directive):
 - **SLK005** (god component) and **SLK008** (responsibility clustering)
@@ -85,8 +105,11 @@ Not yet implemented (later phases per the project directive):
   none of that exists yet. **SLK010** (dependency bottleneck) is also
   deferred: every crisp definition tried either duplicated SLK001/002/
   006/007 or needed a semantic layer this build doesn't have.
-- **Phase 4 — Governance**: baselines (`sleak baseline create`),
-  differential analysis (`sleak diff`), an Architecture Health score.
+- An **Architecture Health score** (directive §20) is deliberately not
+  built yet: every aggregate-percentage design considered either
+  invented an unjustifiable weighting or risked exactly the "opaque
+  score" the directive itself warns against. The finding-identity-based
+  baseline/diff above is the evidence-backed alternative built instead.
 - **Phase 5 — Integration**: SARIF output (`sleak-sarif`), Traci/
   Kaptaind machine-interface polish (`sleak-integration`), advisory
   responsibility clustering, remediation automation.
@@ -106,6 +129,9 @@ sleak check .                    # scan + fail (exit 1) on any MAJOR/CRITICAL fi
 sleak explain SLK007 .            # what SLK007 means, plus any current instances
 sleak graph .                      # architecture graph as Graphviz dot
 sleak graph . --output json         # ...or as raw JSON (independent of --format)
+sleak baseline create .              # accept every current finding as existing debt
+sleak diff HEAD~1 .                   # did the working tree regress since HEAD~1?
+sleak diff origin/main .
 ```
 
 ## Building
@@ -159,3 +185,9 @@ than guessed at.
 History is enabled by default but always optional in practice: scanning
 a directory with no `.git` (or where `git` isn't installed) simply
 skips SLK009 rather than erroring.
+
+`.sleak-baseline.json` (written by `sleak baseline create`, meant to be
+committed) records accepted debt as a plain list of `{"id", "target"}`
+pairs — no evidence, since evidence is recomputed fresh every run.
+`sleak diff` never reads or writes it; it builds its own reference set
+on the fly from the compared ref.

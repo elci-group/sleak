@@ -18,6 +18,9 @@ pub enum SleakError {
     #[error("invalid configuration at {path}: {reason}")]
     Configuration { path: PathBuf, reason: String },
 
+    #[error("git command failed ({command}): {reason}")]
+    GitFailure { command: String, reason: String },
+
     #[error("I/O error at {path}: {source}")]
     Io {
         path: PathBuf,

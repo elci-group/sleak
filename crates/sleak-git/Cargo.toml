@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+sleak-core.workspace = true
 camino.workspace = true
 
 [dev-dependencies]

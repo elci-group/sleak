@@ -1,10 +1,11 @@
 mod analysis;
 mod graph_render;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use sleak_core::{Result as SleakResult, Severity, SleakError};
-use sleak_report::{Format, Report};
+use sleak_policy::Config;
+use sleak_report::{Baseline, BaselineSummary, Format, Report};
 use std::process::ExitCode;
 use std::str::FromStr;
 
@@ -54,6 +55,32 @@ enum Command {
         #[arg(long = "output", default_value = "dot")]
         output: String,
     },
+    /// Manage the accepted-debt baseline (directive §16).
+    Baseline {
+        #[command(subcommand)]
+        action: BaselineAction,
+    },
+    /// Compare the working tree's architecture against `git_ref`
+    /// (directive §17) — did this change increase concentration?
+    /// Informational: always exits 0 on a successful run, regardless of
+    /// what it finds. Requires `path` to be a git repository.
+    Diff {
+        git_ref: String,
+        #[arg(default_value = ".")]
+        path: Utf8PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum BaselineAction {
+    /// Record every current finding as accepted debt. From then on,
+    /// `sleak check` only blocks on *new* findings not already in the
+    /// baseline — a project doesn't need to reach zero findings before
+    /// Sleak becomes useful as a gate.
+    Create {
+        #[arg(default_value = ".")]
+        path: Utf8PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -91,14 +118,39 @@ fn run(command: Command, format: Format) -> SleakResult<ExitCode> {
         Command::Check { path } => run_scan_or_check(&path, format, Mode::Check),
         Command::Explain { id, path } => run_explain(&id, &path, format),
         Command::Graph { path, output } => run_graph(&path, &output),
+        Command::Baseline {
+            action: BaselineAction::Create { path },
+        } => run_baseline_create(&path),
+        Command::Diff { git_ref, path } => run_diff(&git_ref, &path, format),
     }
 }
 
 fn run_scan_or_check(path: &Utf8PathBuf, format: Format, mode: Mode) -> SleakResult<ExitCode> {
     let findings = analysis::analyse(path)?;
-    let blocking = findings.iter().any(|f| f.severity >= Severity::Major);
 
-    let report = Report::new(findings);
+    let baseline_path = path.join(sleak_report::BASELINE_FILE_NAME);
+    let existing_baseline = Baseline::load(baseline_path.as_std_path())?;
+
+    // Blocking severity is judged only against *new* findings once a
+    // baseline exists (directive §16) — a project's already-accepted
+    // debt shouldn't keep failing `check` forever. With no baseline,
+    // every current finding is judged, same as Phase 1.
+    let (judged, baseline_summary) = match &existing_baseline {
+        Some(baseline) => {
+            let outcome = sleak_report::diff_findings(&findings, baseline);
+            let summary = BaselineSummary {
+                new_count: outcome.new.len(),
+                existing_count: outcome.existing.len(),
+                resolved: outcome.resolved,
+            };
+            (outcome.new, Some(summary))
+        }
+        None => (findings.clone(), None),
+    };
+    let blocking = judged.iter().any(|f| f.severity >= Severity::Major);
+
+    let mut report = Report::new(findings);
+    report.baseline = baseline_summary;
     println!("{}", sleak_report::render(&report, format));
 
     Ok(match mode {
@@ -106,6 +158,114 @@ fn run_scan_or_check(path: &Utf8PathBuf, format: Format, mode: Mode) -> SleakRes
         Mode::Check if blocking => ExitCode::from(1),
         Mode::Check => ExitCode::SUCCESS,
     })
+}
+
+fn run_baseline_create(path: &Utf8PathBuf) -> SleakResult<ExitCode> {
+    let findings = analysis::analyse(path)?;
+    let baseline = Baseline::from_findings(&findings);
+    let baseline_path = path.join(sleak_report::BASELINE_FILE_NAME);
+    baseline.save(baseline_path.as_std_path())?;
+
+    println!(
+        "Baseline created at {baseline_path}: {} finding(s) recorded as accepted debt.",
+        baseline.findings.len()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_diff(git_ref: &str, path: &Utf8PathBuf, format: Format) -> SleakResult<ExitCode> {
+    let config = Config::load(path.as_std_path())?;
+    let current = analysis::analyse_with_config(path, &config)?;
+
+    let snapshot = tempfile::tempdir().map_err(|source| SleakError::Io {
+        path: path.as_std_path().to_path_buf(),
+        source,
+    })?;
+    let snapshot_path = Utf8Path::from_path(snapshot.path())
+        .expect("tempdir path is valid UTF-8")
+        .to_path_buf();
+    sleak_git::archive_ref(path, git_ref, &snapshot_path)?;
+    let reference = analysis::analyse_with_config(&snapshot_path, &config)?;
+
+    // `git archive` extracts a bare file tree with no `.git` directory,
+    // so the reference snapshot can never have SLK009 findings of its
+    // own — comparing it against the working tree's real history would
+    // make every current SLK009 finding look "new" on every diff,
+    // regardless of whether this change touched anything. SLK009 is
+    // inherently a trend-over-real-history signal, not a snapshot
+    // property, so it's excluded from both sides here; `sleak scan`/
+    // `sleak check` remain the way to see it.
+    let current = without_change_concentration(current);
+    let reference = without_change_concentration(reference);
+
+    let baseline = Baseline::from_findings(&reference);
+    let outcome = sleak_report::diff_findings(&current, &baseline);
+
+    let verdict = if !outcome.new.is_empty() {
+        "REGRESSION"
+    } else if !outcome.resolved.is_empty() {
+        "IMPROVEMENT"
+    } else {
+        "UNCHANGED"
+    };
+
+    match format {
+        Format::Json => {
+            let payload = serde_json::json!({
+                "schema_version": sleak_report::REPORT_SCHEMA_VERSION,
+                "tool": "sleak",
+                "compared_to": git_ref,
+                "verdict": verdict,
+                "new": outcome.new,
+                "existing": outcome.existing,
+                "resolved": outcome.resolved,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&payload).expect("payload is always serializable")
+            );
+        }
+        Format::Human => {
+            println!("Architectural diff: {git_ref} -> working tree\n");
+            print_finding_list(
+                &format!("New findings ({})", outcome.new.len()),
+                &outcome.new,
+            );
+            if !outcome.resolved.is_empty() {
+                println!("Resolved findings ({}):", outcome.resolved.len());
+                for entry in &outcome.resolved {
+                    println!("  {} {}", entry.id, entry.target);
+                }
+                println!();
+            }
+            println!(
+                "Unchanged findings still present: {}",
+                outcome.existing.len()
+            );
+            println!("\nVerdict: {verdict}");
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn without_change_concentration(findings: Vec<sleak_core::Finding>) -> Vec<sleak_core::Finding> {
+    findings
+        .into_iter()
+        .filter(|f| f.id.as_str() != "SLK009")
+        .collect()
+}
+
+fn print_finding_list(heading: &str, findings: &[sleak_core::Finding]) {
+    println!("{heading}:");
+    if findings.is_empty() {
+        println!("  (none)");
+    } else {
+        for finding in findings {
+            println!("  {} {}", finding.id, finding.target);
+        }
+    }
+    println!();
 }
 
 /// Static, taxonomy-level descriptions (directive §18) — not tied to
@@ -189,6 +349,8 @@ fn exit_code_for(err: &SleakError) -> ExitCode {
             ExitCode::from(2)
         }
         SleakError::ParseFailure { .. } => ExitCode::from(3),
-        SleakError::MetadataFailure { .. } | SleakError::Io { .. } => ExitCode::from(4),
+        SleakError::MetadataFailure { .. }
+        | SleakError::GitFailure { .. }
+        | SleakError::Io { .. } => ExitCode::from(4),
     }
 }

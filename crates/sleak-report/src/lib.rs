@@ -1,6 +1,14 @@
 //! The stable, versioned finding report (directive §13) and its human /
 //! JSON renderers.
 
+mod baseline;
+mod diff;
+
+pub use baseline::{
+    Baseline, BaselineEntry, BaselineSummary, BASELINE_FILE_NAME, BASELINE_SCHEMA_VERSION,
+};
+pub use diff::{diff_findings, DiffOutcome};
+
 use serde::{Deserialize, Serialize};
 use sleak_core::Finding;
 use std::str::FromStr;
@@ -12,6 +20,11 @@ pub struct Report {
     pub schema_version: String,
     pub tool: String,
     pub findings: Vec<Finding>,
+    /// Present only when the run consulted a baseline (directive §16).
+    /// `findings` above always lists every current finding regardless —
+    /// this is an additive summary, not a filter.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub baseline: Option<BaselineSummary>,
 }
 
 impl Report {
@@ -23,6 +36,7 @@ impl Report {
             schema_version: REPORT_SCHEMA_VERSION.to_string(),
             tool: "sleak".to_string(),
             findings,
+            baseline: None,
         }
     }
 }
@@ -57,11 +71,21 @@ pub fn render(report: &Report, format: Format) -> String {
 }
 
 fn render_human(report: &Report) -> String {
-    if report.findings.is_empty() {
-        return "No findings.\n".to_string();
+    let mut out = String::new();
+    if let Some(summary) = &report.baseline {
+        out.push_str(&format!(
+            "Baseline: {} new, {} existing (accepted), {} resolved\n\n",
+            summary.new_count,
+            summary.existing_count,
+            summary.resolved.len()
+        ));
     }
 
-    let mut out = String::new();
+    if report.findings.is_empty() {
+        out.push_str("No findings.\n");
+        return out;
+    }
+
     for finding in &report.findings {
         out.push_str(&format!("Finding: {}\n", finding.id));
         out.push_str(&format!("Severity: {}\n", finding.severity));
