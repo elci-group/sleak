@@ -1,13 +1,19 @@
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use sleak_core::{Finding, NodeId, Result as SleakResult};
 use sleak_policy::Config;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Runs the full Phase 1-3 pipeline against `path` and returns every
-/// finding, already sorted (highest severity first). Shared by `scan`,
-/// `check`, and `explain` so all three see identical results for the
-/// same workspace. Loads `.sleak.toml` from `path` itself.
-pub fn analyse(path: &Utf8Path) -> SleakResult<Vec<Finding>> {
+/// A finding's target `NodeId` -> the workspace-relative source file it
+/// maps to (module nodes only — crate nodes have no single file).
+/// Consumed by the SARIF renderer; irrelevant to human/JSON output.
+pub type Locations = BTreeMap<NodeId, Utf8PathBuf>;
+
+/// Runs the full Phase 1-4 pipeline against `path` and returns every
+/// finding (already sorted, highest severity first) plus a location
+/// index for SARIF output. Shared by `scan`, `check`, and `explain` so
+/// all three see identical results for the same workspace. Loads
+/// `.sleak.toml` from `path` itself.
+pub fn analyse(path: &Utf8Path) -> SleakResult<(Vec<Finding>, Locations)> {
     let config = Config::load(path.as_std_path())?;
     analyse_with_config(path, &config)
 }
@@ -18,7 +24,10 @@ pub fn analyse(path: &Utf8Path) -> SleakResult<Vec<Finding>> {
 /// must judge both against the *same* policy, not whatever `.sleak.toml`
 /// happened to say at each point in history — otherwise a loosened
 /// threshold could masquerade as an architectural improvement.
-pub fn analyse_with_config(path: &Utf8Path, config: &Config) -> SleakResult<Vec<Finding>> {
+pub fn analyse_with_config(
+    path: &Utf8Path,
+    config: &Config,
+) -> SleakResult<(Vec<Finding>, Locations)> {
     let (model, file_index) = sleak_rust::build_model(path)?;
     let graph = sleak_graph::ArchGraph::from_model(&model);
 
@@ -53,7 +62,12 @@ pub fn analyse_with_config(path: &Utf8Path, config: &Config) -> SleakResult<Vec<
     }
 
     sleak_policy::sort_findings(&mut findings);
-    Ok(findings)
+
+    let locations: Locations = file_index
+        .into_iter()
+        .map(|(path, id)| (id, path))
+        .collect();
+    Ok((findings, locations))
 }
 
 /// How many distinct commits touched each node — a commit that changes

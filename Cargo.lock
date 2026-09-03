@@ -518,6 +518,7 @@ dependencies = [
  "sleak-policy",
  "sleak-report",
  "sleak-rust",
+ "sleak-sarif",
  "tempfile",
 ]
 
@@ -591,6 +592,15 @@ dependencies = [
  "sleak-ir",
  "syn 3.0.4",
  "tempfile",
+]
+
+[[package]]
+name = "sleak-sarif"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "serde_json",
+ "sleak-core",
 ]
 
 [[package]]

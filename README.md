@@ -9,7 +9,7 @@ The anti-monolith architecture engine of ELCI.
 > lets a human or a governance policy decide whether that concentration
 > is acceptable.
 
-## Status: Phase 4 — Governance
+## Status: Phase 5 — Integration (v1 complete)
 
 Deterministic, offline, read-only analysis of a Rust Cargo workspace.
 No mutation of any kind.
@@ -97,22 +97,48 @@ Implemented:
   history to compute it from, so including it would make every current
   SLK009 finding look "new" on every diff regardless of what changed;
   `sleak scan`/`sleak check` remain the way to see it.
+- SARIF 2.1.0 output (directive §13/§27, `sleak-sarif`): `sleak scan
+  --format sarif` / `sleak check --format sarif` for GitHub code
+  scanning and any other SARIF-consuming CI system. A finding whose
+  target resolves to a real source file (module-level findings) gets a
+  real `physicalLocation`; one that doesn't (crate-level findings have
+  no single file) is emitted with no `locations` array at all rather
+  than pointed at a plausible-looking but wrong file. Severity maps to
+  SARIF's `note`/`warning`/`error` levels, with Sleak's own four-level
+  severity preserved verbatim in `properties.severity` so nothing is
+  lost in translation.
+- A `summary` block (`{critical, major, minor, info}` counts) on every
+  JSON report — the evidence-backed answer to directive §11's "Traci
+  consumes Sleak findings as architectural-health evidence": real
+  totals a consumer can read directly, not a synthesized score.
+- `sleak check --ci` (directive §30's canonical CI invocation): behaves
+  exactly like `check`, just always emits JSON regardless of `--format`
+  — `check` already loads config, consults the baseline, and returns a
+  deterministic exit code with no interactive prompts by default, so
+  `--ci` only needed to pin the output shape.
+- Kaptaind integration (directive §11) needs no dedicated code: a
+  `[test] command = "sleak check --ci"` (or similar) in another
+  project's `kaptaind.toml` already gets a deterministic exit code and
+  machine-readable JSON without kaptaind needing to parse human output.
 
-Not yet implemented (later phases per the project directive):
+Deliberately not built, with rationale (not silently missing):
 - **SLK005** (god component) and **SLK008** (responsibility clustering)
-  are reserved but not built — the directive marks the semantic signals
-  they need (naming, documentation terminology, ...) as advisory, and
-  none of that exists yet. **SLK010** (dependency bottleneck) is also
-  deferred: every crisp definition tried either duplicated SLK001/002/
-  006/007 or needed a semantic layer this build doesn't have.
-- An **Architecture Health score** (directive §20) is deliberately not
-  built yet: every aggregate-percentage design considered either
-  invented an unjustifiable weighting or risked exactly the "opaque
-  score" the directive itself warns against. The finding-identity-based
-  baseline/diff above is the evidence-backed alternative built instead.
-- **Phase 5 — Integration**: SARIF output (`sleak-sarif`), Traci/
-  Kaptaind machine-interface polish (`sleak-integration`), advisory
-  responsibility clustering, remediation automation.
+  need semantic signals (naming, documentation terminology, ...) this
+  build doesn't have — the directive marks that analysis as advisory,
+  and faking it would violate §2.3 ("evidence before judgement").
+  **SLK010** (dependency bottleneck): every crisp definition tried
+  either duplicated SLK001/002/006/007 or needed the same missing
+  semantic layer.
+- An **Architecture Health score** (directive §20): every aggregate-
+  percentage design considered either invented an unjustifiable
+  weighting or risked exactly the "opaque score" the directive itself
+  warns against. The `summary` counts above and the finding-identity-
+  based baseline/diff mechanism are the evidence-backed alternative
+  built instead.
+- Cross-tool finding correlation (directive §10's unified `FRACT-001
+  SCRAWNY-004 SLEAK-007` idea) and remediation *automation* (directive
+  §26 explicitly wants "trust before automation" — Sleak stays
+  diagnostic-only, offering `recommendation` text, never mutating code).
 
 Type/call/trait-graph analysis (real semantic resolution — `Calls`,
 `Implements`, generic instantiation) needs a real Rust semantic source
@@ -125,7 +151,9 @@ integration per the directive's §11) and isn't attempted here.
 sleak                          # scan the current directory (human output)
 sleak scan .                    # same, explicit
 sleak scan --format json .
+sleak scan --format sarif .         # SARIF 2.1.0, for GitHub code scanning / CI
 sleak check .                    # scan + fail (exit 1) on any MAJOR/CRITICAL finding — the CI gate
+sleak check --ci .                # same, always JSON regardless of --format
 sleak explain SLK007 .            # what SLK007 means, plus any current instances
 sleak graph .                      # architecture graph as Graphviz dot
 sleak graph . --output json         # ...or as raw JSON (independent of --format)

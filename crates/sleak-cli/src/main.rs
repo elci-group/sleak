@@ -18,7 +18,8 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// Output format for scan/check/explain: human or json.
+    /// Output format for scan/check/explain/diff: human or json.
+    /// `scan`/`check` also accept sarif.
     #[arg(long, global = true, default_value = "human")]
     format: String,
 }
@@ -36,6 +37,13 @@ enum Command {
     Check {
         #[arg(default_value = ".")]
         path: Utf8PathBuf,
+        /// Canonical CI mode (directive §30): forces JSON output
+        /// regardless of `--format`. Behaviour is otherwise identical —
+        /// `check` already loads config, consults the baseline, and
+        /// returns a deterministic exit code with no interactive
+        /// prompts by default.
+        #[arg(long)]
+        ci: bool,
     },
     /// Explain one finding id: a general description of what it means,
     /// plus every currently-detected finding with that id and its full
@@ -85,20 +93,11 @@ enum BaselineAction {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-
-    let format = match Format::from_str(&cli.format) {
-        Ok(format) => format,
-        Err(reason) => {
-            eprintln!("error: {reason}");
-            return ExitCode::from(2);
-        }
-    };
-
     let command = cli.command.unwrap_or(Command::Scan {
         path: Utf8PathBuf::from("."),
     });
 
-    match run(command, format) {
+    match run(command, &cli.format) {
         Ok(code) => code,
         Err(err) => {
             eprintln!("error: {err}");
@@ -112,10 +111,37 @@ enum Mode {
     Check,
 }
 
-fn run(command: Command, format: Format) -> SleakResult<ExitCode> {
+/// `scan`/`check` accept one more format than everything else: SARIF
+/// (directive §13) is meaningful for a finding report but not for
+/// `explain`'s or `diff`'s different shapes, so it's scoped to this
+/// enum rather than `sleak_report::Format` itself.
+enum OutputFormat {
+    Human,
+    Json,
+    Sarif,
+}
+
+impl FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "human" => Ok(Self::Human),
+            "json" => Ok(Self::Json),
+            "sarif" => Ok(Self::Sarif),
+            other => Err(format!(
+                "unsupported format '{other}' (supported: human, json, sarif)"
+            )),
+        }
+    }
+}
+
+fn run(command: Command, format: &str) -> SleakResult<ExitCode> {
     match command {
         Command::Scan { path } => run_scan_or_check(&path, format, Mode::Scan),
-        Command::Check { path } => run_scan_or_check(&path, format, Mode::Check),
+        Command::Check { path, ci } => {
+            run_scan_or_check(&path, if ci { "json" } else { format }, Mode::Check)
+        }
         Command::Explain { id, path } => run_explain(&id, &path, format),
         Command::Graph { path, output } => run_graph(&path, &output),
         Command::Baseline {
@@ -125,8 +151,16 @@ fn run(command: Command, format: Format) -> SleakResult<ExitCode> {
     }
 }
 
-fn run_scan_or_check(path: &Utf8PathBuf, format: Format, mode: Mode) -> SleakResult<ExitCode> {
-    let findings = analysis::analyse(path)?;
+fn run_scan_or_check(path: &Utf8PathBuf, format: &str, mode: Mode) -> SleakResult<ExitCode> {
+    let output_format = match OutputFormat::from_str(format) {
+        Ok(f) => f,
+        Err(reason) => {
+            eprintln!("error: {reason}");
+            return Ok(ExitCode::from(2));
+        }
+    };
+
+    let (findings, locations) = analysis::analyse(path)?;
 
     let baseline_path = path.join(sleak_report::BASELINE_FILE_NAME);
     let existing_baseline = Baseline::load(baseline_path.as_std_path())?;
@@ -149,9 +183,19 @@ fn run_scan_or_check(path: &Utf8PathBuf, format: Format, mode: Mode) -> SleakRes
     };
     let blocking = judged.iter().any(|f| f.severity >= Severity::Major);
 
-    let mut report = Report::new(findings);
-    report.baseline = baseline_summary;
-    println!("{}", sleak_report::render(&report, format));
+    match output_format {
+        OutputFormat::Sarif => println!("{}", sleak_sarif::render_sarif(&findings, &locations)),
+        OutputFormat::Human | OutputFormat::Json => {
+            let mut report = Report::new(findings);
+            report.baseline = baseline_summary;
+            let format = if matches!(output_format, OutputFormat::Json) {
+                Format::Json
+            } else {
+                Format::Human
+            };
+            println!("{}", sleak_report::render(&report, format));
+        }
+    }
 
     Ok(match mode {
         Mode::Scan => ExitCode::SUCCESS,
@@ -161,7 +205,7 @@ fn run_scan_or_check(path: &Utf8PathBuf, format: Format, mode: Mode) -> SleakRes
 }
 
 fn run_baseline_create(path: &Utf8PathBuf) -> SleakResult<ExitCode> {
-    let findings = analysis::analyse(path)?;
+    let (findings, _locations) = analysis::analyse(path)?;
     let baseline = Baseline::from_findings(&findings);
     let baseline_path = path.join(sleak_report::BASELINE_FILE_NAME);
     baseline.save(baseline_path.as_std_path())?;
@@ -173,9 +217,17 @@ fn run_baseline_create(path: &Utf8PathBuf) -> SleakResult<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn run_diff(git_ref: &str, path: &Utf8PathBuf, format: Format) -> SleakResult<ExitCode> {
+fn run_diff(git_ref: &str, path: &Utf8PathBuf, format: &str) -> SleakResult<ExitCode> {
+    let format = match Format::from_str(format) {
+        Ok(f) => f,
+        Err(reason) => {
+            eprintln!("error: {reason}");
+            return Ok(ExitCode::from(2));
+        }
+    };
+
     let config = Config::load(path.as_std_path())?;
-    let current = analysis::analyse_with_config(path, &config)?;
+    let (current, _locations) = analysis::analyse_with_config(path, &config)?;
 
     let snapshot = tempfile::tempdir().map_err(|source| SleakError::Io {
         path: path.as_std_path().to_path_buf(),
@@ -185,7 +237,7 @@ fn run_diff(git_ref: &str, path: &Utf8PathBuf, format: Format) -> SleakResult<Ex
         .expect("tempdir path is valid UTF-8")
         .to_path_buf();
     sleak_git::archive_ref(path, git_ref, &snapshot_path)?;
-    let reference = analysis::analyse_with_config(&snapshot_path, &config)?;
+    let (reference, _locations) = analysis::analyse_with_config(&snapshot_path, &config)?;
 
     // `git archive` extracts a bare file tree with no `.git` directory,
     // so the reference snapshot can never have SLK009 findings of its
@@ -268,46 +320,26 @@ fn print_finding_list(heading: &str, findings: &[sleak_core::Finding]) {
     println!();
 }
 
-/// Static, taxonomy-level descriptions (directive §18) — not tied to
-/// any one run. Only ids Phase 1/2 can actually emit are listed; an
-/// unknown id (including the reserved-but-unimplemented SLK005/008/009/
-/// 010) is reported as unknown rather than described from a doc string
-/// that describes nothing this build can produce.
-fn describe(id: &str) -> Option<&'static str> {
-    match id {
-        "SLK001" => Some(
-            "Excessive fan-in — more direct dependants than the configured limit. A change here has an outsized chance of rippling outward.",
-        ),
-        "SLK002" => Some(
-            "Excessive fan-out — depends on more other nodes than the configured limit. This node has accumulated more coordination responsibility than a single component should carry.",
-        ),
-        "SLK003" => Some(
-            "Architectural cycle — a group of nodes are mutually dependent, so none of them can be understood, tested, or changed in isolation from the rest.",
-        ),
-        "SLK004" => Some(
-            "Boundary violation — an edge crosses two declared architectural layers in a direction the project's policy forbids.",
-        ),
-        "SLK006" => Some(
-            "Excessive centrality — this node's PageRank-style influence over the dependency graph exceeds the configured limit; the architecture leans on it more than most.",
-        ),
-        "SLK007" => Some(
-            "High blast radius — removing this node would disconnect a large fraction of the rest of the architecture from the remainder; it is a structural single point of failure.",
-        ),
-        _ => None,
-    }
-}
+fn run_explain(id: &str, path: &Utf8PathBuf, format: &str) -> SleakResult<ExitCode> {
+    let format = match Format::from_str(format) {
+        Ok(f) => f,
+        Err(reason) => {
+            eprintln!("error: {reason}");
+            return Ok(ExitCode::from(2));
+        }
+    };
 
-fn run_explain(id: &str, path: &Utf8PathBuf, format: Format) -> SleakResult<ExitCode> {
     let normalized = id.to_uppercase();
-    let Some(description) = describe(&normalized) else {
+    let Some(description) = sleak_core::describe(&normalized) else {
         eprintln!(
-            "error: unknown finding id '{id}' (known: SLK001, SLK002, SLK003, SLK004, SLK006, SLK007)"
+            "error: unknown finding id '{id}' (known: SLK001, SLK002, SLK003, SLK004, SLK006, SLK007, SLK009)"
         );
         return Ok(ExitCode::from(2));
     };
     println!("{normalized}: {description}\n");
 
-    let findings: Vec<_> = analysis::analyse(path)?
+    let (all_findings, _locations) = analysis::analyse(path)?;
+    let findings: Vec<_> = all_findings
         .into_iter()
         .filter(|f| f.id.as_str() == normalized)
         .collect();

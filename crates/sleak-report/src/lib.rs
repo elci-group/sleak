@@ -10,15 +10,44 @@ pub use baseline::{
 pub use diff::{diff_findings, DiffOutcome};
 
 use serde::{Deserialize, Serialize};
-use sleak_core::Finding;
+use sleak_core::{Finding, Severity};
 use std::str::FromStr;
 
 pub const REPORT_SCHEMA_VERSION: &str = "1";
+
+/// Plain counts by severity — the evidence-backed alternative to an
+/// invented aggregate score (directive §20's warning against opaque
+/// scoring). This is what a consumer like Traci (directive §11, "Sleak
+/// findings as architectural-health evidence") reads: real totals, not
+/// a synthesized 0-100 number.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Summary {
+    pub critical: usize,
+    pub major: usize,
+    pub minor: usize,
+    pub info: usize,
+}
+
+impl Summary {
+    fn from_findings(findings: &[Finding]) -> Self {
+        let mut summary = Summary::default();
+        for finding in findings {
+            match finding.severity {
+                Severity::Critical => summary.critical += 1,
+                Severity::Major => summary.major += 1,
+                Severity::Minor => summary.minor += 1,
+                Severity::Info => summary.info += 1,
+            }
+        }
+        summary
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub schema_version: String,
     pub tool: String,
+    pub summary: Summary,
     pub findings: Vec<Finding>,
     /// Present only when the run consulted a baseline (directive §16).
     /// `findings` above always lists every current finding regardless —
@@ -30,11 +59,13 @@ pub struct Report {
 impl Report {
     /// `findings` is expected pre-sorted (as `sleak_policy::evaluate`
     /// returns it) — this constructor doesn't re-sort, so ordering
-    /// stays owned by whichever crate computed it.
+    /// stays owned by whichever crate computed it. `summary` is
+    /// computed from `findings` here, always in sync with them.
     pub fn new(findings: Vec<Finding>) -> Self {
         Self {
             schema_version: REPORT_SCHEMA_VERSION.to_string(),
             tool: "sleak".to_string(),
+            summary: Summary::from_findings(&findings),
             findings,
             baseline: None,
         }
@@ -72,6 +103,10 @@ pub fn render(report: &Report, format: Format) -> String {
 
 fn render_human(report: &Report) -> String {
     let mut out = String::new();
+    out.push_str(&format!(
+        "Summary: {} critical, {} major, {} minor, {} info\n\n",
+        report.summary.critical, report.summary.major, report.summary.minor, report.summary.info
+    ));
     if let Some(summary) = &report.baseline {
         out.push_str(&format!(
             "Baseline: {} new, {} existing (accepted), {} resolved\n\n",
@@ -127,7 +162,16 @@ mod tests {
     #[test]
     fn empty_report_renders_no_findings_for_humans() {
         let report = Report::new(vec![]);
-        assert_eq!(render(&report, Format::Human), "No findings.\n");
+        let text = render(&report, Format::Human);
+        assert!(text.contains("Summary: 0 critical, 0 major, 0 minor, 0 info"));
+        assert!(text.ends_with("No findings.\n"));
+    }
+
+    #[test]
+    fn summary_counts_findings_by_severity() {
+        let report = Report::new(vec![sample_finding()]); // Major
+        assert_eq!(report.summary.major, 1);
+        assert_eq!(report.summary.critical, 0);
     }
 
     #[test]

@@ -31,10 +31,10 @@ impl fmt::Display for Severity {
 /// A stable finding-taxonomy identifier (directive §18: "Finding IDs
 /// MUST remain stable").
 ///
-/// Only the IDs Phase 1 can actually emit are constructible here.
-/// SLK004-SLK009 are reserved by the directive's taxonomy but are added
-/// as constructors once the phase that detects them lands, so this type
-/// never carries a name nothing can produce.
+/// Only ids this build can actually emit are constructible here.
+/// SLK005/008/010 are reserved by the directive's taxonomy but are
+/// added as constructors only once whatever phase detects them lands,
+/// so this type never carries a name nothing can produce.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FindingId(String);
 
@@ -76,6 +76,40 @@ impl FindingId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// The taxonomy-level description for a finding id (directive §18) —
+/// what it means in general, independent of any one run. Shared by
+/// `sleak explain` and the SARIF renderer's rule metadata so the two
+/// never drift apart. Only ids this build can actually emit are
+/// covered; an unknown id (including the reserved-but-unimplemented
+/// SLK005/008/010) returns `None` rather than a description of
+/// something nothing here produces.
+pub fn describe(id: &str) -> Option<&'static str> {
+    match id {
+        "SLK001" => Some(
+            "Excessive fan-in — more direct dependants than the configured limit. A change here has an outsized chance of rippling outward.",
+        ),
+        "SLK002" => Some(
+            "Excessive fan-out — depends on more other nodes than the configured limit. This node has accumulated more coordination responsibility than a single component should carry.",
+        ),
+        "SLK003" => Some(
+            "Architectural cycle — a group of nodes are mutually dependent, so none of them can be understood, tested, or changed in isolation from the rest.",
+        ),
+        "SLK004" => Some(
+            "Boundary violation — an edge crosses two declared architectural layers in a direction the project's policy forbids.",
+        ),
+        "SLK006" => Some(
+            "Excessive centrality — this node's PageRank-style influence over the dependency graph exceeds the configured limit; the architecture leans on it more than most.",
+        ),
+        "SLK007" => Some(
+            "High blast radius — removing this node would disconnect a large fraction of the rest of the architecture from the remainder; it is a structural single point of failure.",
+        ),
+        "SLK009" => Some(
+            "Architectural change concentration — this location was touched by a disproportionate fraction of recent commits; it repeatedly attracts change.",
+        ),
+        _ => None,
     }
 }
 

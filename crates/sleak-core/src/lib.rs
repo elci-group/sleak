@@ -10,7 +10,7 @@ mod finding;
 mod node;
 
 pub use error::SleakError;
-pub use finding::{Finding, FindingId, Severity};
+pub use finding::{describe, Finding, FindingId, Severity};
 pub use node::{EdgeKind, NodeId, NodeKind};
 
 pub type Result<T> = std::result::Result<T, SleakError>;

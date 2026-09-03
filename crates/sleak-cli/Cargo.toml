@@ -17,6 +17,7 @@ sleak-rust.workspace = true
 sleak-git.workspace = true
 sleak-policy.workspace = true
 sleak-report.workspace = true
+sleak-sarif.workspace = true
 clap.workspace = true
 camino.workspace = true
 serde_json.workspace = true

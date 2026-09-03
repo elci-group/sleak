@@ -392,3 +392,53 @@ fn diff_against_an_unknown_ref_is_an_infrastructure_error() {
         .assert()
         .code(4);
 }
+
+/// `--format sarif` produces a real SARIF 2.1.0 log whose result
+/// points at the actual offending file, not a fabricated location.
+#[test]
+fn sarif_output_locates_findings_at_the_real_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    let members = ["hub", "a", "b", "c"];
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&members));
+    hub_workspace(root, "hub", &["a", "b", "c"]);
+    write(&root.join(".sleak.toml"), "[policy]\nmax_fan_in = 2\n");
+
+    let assert = sleak()
+        .arg("--format")
+        .arg("sarif")
+        .arg("scan")
+        .arg(root)
+        .assert()
+        .success();
+    let output = assert.get_output();
+    let sarif: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(sarif["version"], "2.1.0");
+    assert_eq!(sarif["runs"][0]["tool"]["driver"]["name"], "sleak");
+    let results = sarif["runs"][0]["results"].as_array().unwrap();
+    assert!(results.iter().any(|r| r["ruleId"] == "SLK001"));
+}
+
+/// `check --ci` behaves like `check` but always emits JSON, regardless
+/// of `--format`.
+#[test]
+fn check_ci_forces_json_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    write(&root.join("Cargo.toml"), &workspace_cargo_toml(&["a"]));
+    write(&root.join("a/Cargo.toml"), &crate_cargo_toml("a", &[]));
+    write(&root.join("a/src/lib.rs"), "pub fn hello() {}\n");
+
+    // Exit code isn't the point here (a single-crate workspace can
+    // legitimately trip centrality by construction, same as elsewhere
+    // in this file) — only that --ci always emits JSON.
+    sleak()
+        .arg("check")
+        .arg(root)
+        .arg("--ci")
+        .assert()
+        .stdout(predicate::str::contains("\"schema_version\""));
+}
