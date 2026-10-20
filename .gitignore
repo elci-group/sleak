@@ -5,3 +5,11 @@
 /.lwoodz/
 /.traci/
 /.kaptaind/
+.azusa/
+.kaptaind/
+.lwoodz/
+.uni/
+.traci/
+.orb
+*.log
+.env

@@ -1,0 +1,16 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH create 1  "create " 
+.SH NAME
+create \- Record every current finding as accepted debt. From then on, `sleak check` only blocks on *new* findings not already in the baseline — a project doesn\*(Aqt need to reach zero findings before Sleak becomes useful as a gate
+.SH SYNOPSIS
+\fBcreate\fR [\fB\-h\fR|\fB\-\-help\fR] [\fIPATH\fR] 
+.SH DESCRIPTION
+Record every current finding as accepted debt. From then on, `sleak check` only blocks on *new* findings not already in the baseline — a project doesn\*(Aqt need to reach zero findings before Sleak becomes useful as a gate
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIPATH\fR] [default: .]
+

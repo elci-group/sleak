@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH graph 1  "graph " 
+.SH NAME
+graph \- Export the raw architecture graph (nodes + edges), bypassing policy findings entirely
+.SH SYNOPSIS
+\fBgraph\fR [\fB\-\-output\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIPATH\fR] 
+.SH DESCRIPTION
+Export the raw architecture graph (nodes + edges), bypassing policy findings entirely
+.SH OPTIONS
+.TP
+\fB\-\-output\fR \fI<OUTPUT>\fR [default: dot]
+dot or json. Independent of `\-\-format`, which only applies to finding reports
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIPATH\fR] [default: .]
+

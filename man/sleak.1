@@ -1,0 +1,43 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH sleak 1  "sleak 0.1.0" 
+.SH NAME
+sleak \- Sleak — the anti\-monolith architecture engine of ELCI. Detects, quantifies and explains where architectural responsibility concentrates in a Rust workspace
+.SH SYNOPSIS
+\fBsleak\fR [\fB\-\-format\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Sleak — the anti\-monolith architecture engine of ELCI. Detects, quantifies and explains where architectural responsibility concentrates in a Rust workspace
+.SH OPTIONS
+.TP
+\fB\-\-format\fR \fI<FORMAT>\fR [default: human]
+Output format for scan/check/explain/diff: human or json. `scan`/`check` also accept sarif
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+sleak\-scan(1)
+Analyse the workspace and report findings. Always exits 0 on a successful run, regardless of what it finds
+.TP
+sleak\-check(1)
+Analyse the workspace and fail (exit 1) if any finding is MAJOR or CRITICAL. The canonical CI invocation
+.TP
+sleak\-explain(1)
+Explain one finding id: a general description of what it means, plus every currently\-detected finding with that id and its full evidence
+.TP
+sleak\-graph(1)
+Export the raw architecture graph (nodes + edges), bypassing policy findings entirely
+.TP
+sleak\-baseline(1)
+Manage the accepted\-debt baseline (directive §16)
+.TP
+sleak\-diff(1)
+Compare the working tree\*(Aqs architecture against `git_ref` (directive §17) — did this change increase concentration? Informational: always exits 0 on a successful run, regardless of what it finds. Requires `path` to be a git repository
+.TP
+sleak\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.1.0

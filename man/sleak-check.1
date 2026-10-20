@@ -1,0 +1,19 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH check 1  "check " 
+.SH NAME
+check \- Analyse the workspace and fail (exit 1) if any finding is MAJOR or CRITICAL. The canonical CI invocation
+.SH SYNOPSIS
+\fBcheck\fR [\fB\-\-ci\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIPATH\fR] 
+.SH DESCRIPTION
+Analyse the workspace and fail (exit 1) if any finding is MAJOR or CRITICAL. The canonical CI invocation
+.SH OPTIONS
+.TP
+\fB\-\-ci\fR
+Canonical CI mode (directive §30): forces JSON output regardless of `\-\-format`. Behaviour is otherwise identical — `check` already loads config, consults the baseline, and returns a deterministic exit code with no interactive prompts by default
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+[\fIPATH\fR] [default: .]
+
