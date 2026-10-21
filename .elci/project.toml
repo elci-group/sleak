@@ -1,0 +1,32 @@
+# ELCI project manifest — ELCI-RGCA-001 §5
+# Provisional (Phase 1 machine draft). Human review required for Tier-S/A.
+schema_version = "1.0"
+
+[project]
+id = "sleak"
+name = "sleak"
+descriptor = "Sleak is the anti-monolith architecture engine of ELCI: a deterministic, read-only analyzer for Rust Cargo workspaces that builds crate and module graphs, measures fan-in, centrality, cycles, and blast radius, and reports where responsibility, dependency, and change concentrate against declared boundaries."
+status = "active"
+maturity = "alpha"
+class = "developer-tool"
+
+[ownership]
+organisation = "elci-group"
+maintainer = "ELCI Group"
+
+[architecture]
+independent_boundary = true
+boundary_reason = "Provisional Phase 1 classification (tier B); pending §17 rationalisation review."
+parent = []
+capabilities = []
+consumers = []
+
+[authority]
+human_write_authority = true
+agent_write_authority = false
+autonomous_operation = false
+
+[lifecycle]
+introduced = "2026"
+supersedes = []
+superseded_by = []
